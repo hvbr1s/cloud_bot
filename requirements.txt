@@ -10,3 +10,4 @@ eth-account
 pathlib
 fastapi
 pydantic
+uvicorn
