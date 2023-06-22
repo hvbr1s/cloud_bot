@@ -1,42 +1,18 @@
 import os
 import uuid
 import json
-from typing import Callable, List, Union
-
-from dotenv import load_dotenv
-from flask import Flask, render_template, request, make_response, redirect, jsonify
-from web3 import Web3
-from eth_account.messages import encode_defunct
-
-import pinecone
-import openai
-
-from langchain import LLMChain
-from langchain.agents import initialize_agent, load_tools, ZeroShotAgent, AgentExecutor, Tool, LLMSingleActionAgent, AgentOutputParser
-from langchain.prompts import BaseChatPromptTemplate
-from langchain.memory import ConversationBufferMemory, ChatMessageHistory
-from langchain.chains import ConversationChain, ConversationalRetrievalChain, RetrievalQA
-from langchain.chains.conversation.memory import ConversationBufferWindowMemory
 from langchain.vectorstores import Pinecone
 from langchain.embeddings.openai import OpenAIEmbeddings
-
-
-from langchain.llms import OpenAI
-from langchain.chat_models import ChatOpenAI
-from langchain import SerpAPIWrapper, LLMChain
-from typing import List, Union
-from langchain.schema import AgentAction, AgentFinish, HumanMessage
-from pathlib import Path
-
+from dotenv import load_dotenv
+from web3 import Web3
+import pinecone
+import openai
 from fastapi import FastAPI
 from pydantic import BaseModel
 
 import re
 
-
-
 load_dotenv()
-history = ChatMessageHistory()
 
 env_vars = [
     'OPENAI_API_KEY',
@@ -70,10 +46,10 @@ embed_model = "text-embedding-ada-002"
 
 primer = """
 
-You are Samantha, a highly intelligent and helpful virtual assistant designed to support Ledger, a French cryptocurrency company led by CEO Pascal Gauthier. Your primary responsibility is to assist Ledger customer support agents by providing accurate answers to their questions. If a question is unclear or lacks detail, ask for more information instead of making assumptions. If you are unsure of an answer, be honest and seek clarification.
+You are Samantha, a highly intelligent and helpful virtual assistant designed to support Ledger, a French cryptocurrency company led by CEO Pascal Gauthier. Your primary responsibility is to assist Ledger users by providing accurate answers to their questions. If a question is unclear or lacks detail, ask for more information instead of making assumptions. If you are unsure of an answer, be honest and seek clarification.
 
 Agents may ask about various Ledger products, including the Ledger Nano S (no battery, low storage), Nano X (Bluetooth, large storage, has a battery), Nano S Plus (large storage, no Bluetooth, no battery), Ledger Stax (unreleased), Ledger Recover and Ledger Live.
-The official Ledger store is located at https://shop.ledger.com/. For authorized resellers, please visit https://www.ledger.com/reseller/ , do not modify or share any other links for these purposes. 
+The official Ledger store is located at https://shop.ledger.com/. The Ledger Recover White Paper is located at https://github.com/LedgerHQ/recover-whitepaper . For authorized resellers, please visit https://www.ledger.com/reseller/. Do not modify or share any other links for these purposes.
 
 When agents inquire about tokens, crypto or coins supported in Ledger Live , it is crucial to strictly recommend checking the Crypto Asset List link to verify support. 
 The link to the Crypto Asset List of supported crypto coins and tokens is: https://support.ledger.com/hc/en-us/articles/10479755500573?docs=true/. Do NOT provide any other links to the list.
@@ -118,7 +94,7 @@ async def react_description(query: Query):
 
         contexts = [item['metadata']['text'] for item in res_query['matches']]
 
-        augmented_query = "CONTEXT: " + "\n\n-----\n\n" + "\n\n---\n\n".join(contexts) + "\n\n-----\n\n"+ "QUESTION: " + "\n\n" +  query.user_input + "? Provide a short answer to the question and make sure to incorporate relevant URL links from the previous CONTEXT. NEVER enclose the links in parentheses. Avoid sharing a link that's not explicitly included in the previous CONTEXT. If you are unable to provide an accurate answer to the question, it is best to honestly acknowledge it and request further information."
+        augmented_query = "CONTEXT: " + "\n\n-----\n\n" + "\n\n---\n\n".join(contexts) + "\n\n-----\n\n"+ "QUESTION: " + "\n\n" +  query.user_input + "? Please provide a short answer to the question and make sure to incorporate only the most relevant URL link from the previous CONTEXT in your response. Always present URLs as plain text, without markdown formatting. Only share URLs that are explicitly mentioned within the previous CONTEXT."
 
 
         print(augmented_query)
@@ -140,3 +116,7 @@ async def react_description(query: Query):
     except ValueError as e:
         print(e)
         raise HTTPException(status_code=400, detail="Invalid input")
+
+############### START COMMAND ##########
+
+#   uvicorn api_bot:app --reload
