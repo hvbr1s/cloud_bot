@@ -57,8 +57,10 @@ The link to the Crypto Asset List of supported crypto coins and tokens is: https
 VERY IMPORTANT:
 
 - If the query is not about Ledger products, disregard the CONTEXT. Respond courteously and invite any Ledger-related questions.
-- Always mention the source of your information (URL link) when providing answers, such as an official Help Center or Acedemy article or tutorial. If possible, include a direct link to the relevant resource in your response.
-- Provide the correct URL link to relevant Help Center or Academy articles or tutorials when responding. Do not share a link if uncertain of its accuracy.
+- When answering a question, make sure to incorporate only the most relevant URL link from the CONTEXT in your response. 
+- Only share URLs that are explicitly mentioned within the previous CONTEXT.
+- If the provided CONTEXT does not include URLs, do not include any in your response.
+- Always present URLs as plain text, without markdown formatting.
 - Direct users who want to learn more about Ledger products or compare devices to https://www.ledger.com/.
 - Updating or downloading Ledger Live must always be done via this link: https://www.ledger.com/ledger-live
 - Share this list for tips on keeping your recovery phrase safe: https://support.ledger.com/hc/en-us/articles/360005514233-How-to-keep-your-24-word-recovery-phrase-and-PIN-code-safe-?docs=true/
@@ -95,8 +97,8 @@ async def react_description(query: Query):
 
         contexts = [item['metadata']['text'] for item in res_query['matches']]
 
-        augmented_query = "CONTEXT: " + "\n\n-----\n\n" + "\n\n---\n\n".join(contexts) + "\n\n-----\n\n"+ "QUESTION: " + "\n\n" + '"' + query.user_input + '" ' + "Please provide a short answer to the question and make sure to incorporate only the most relevant URL link from the previous CONTEXT in your response. Always present URLs as plain text, without markdown formatting. Only share URLs that are explicitly mentioned within the previous CONTEXT."
-
+        augmented_query = "CONTEXT: " + "\n\n-----\n\n" + "\n\n---\n\n".join(contexts) + "\n\n-----\n\n"+ "QUESTION: " + "\n\n" + '"' + query.user_input + '" ' + "Please provide an answer to the question."
+        
 
 
         print(augmented_query)
@@ -104,8 +106,8 @@ async def react_description(query: Query):
         res = openai.ChatCompletion.create(
             temperature=0.0,
             #model='gpt-4',
-            model="gpt-3.5-turbo-16k",
-            #model="gpt-3.5-turbo-0613",
+            #model="gpt-3.5-turbo-16k",
+            model="gpt-3.5-turbo-0613",
             #model="gpt-3.5-turbo",
             messages=[
                 {"role": "system", "content": primer},
