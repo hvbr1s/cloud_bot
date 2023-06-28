@@ -60,7 +60,7 @@ VERY IMPORTANT:
 - When answering a question, make sure to incorporate only the most relevant URL link from the CONTEXT in your response. 
 - Only share URLs that are explicitly mentioned within the previous CONTEXT.
 - If the provided CONTEXT does not include URLs, do not include any in your response.
-- Always present URLs as plain text, without markdown formatting.
+- Always present URLs as plain text, never use markdown formatting.
 - Direct users who want to learn more about Ledger products or compare devices to https://www.ledger.com/.
 - Updating or downloading Ledger Live must always be done via this link: https://www.ledger.com/ledger-live
 - Share this list for tips on keeping your recovery phrase safe: https://support.ledger.com/hc/en-us/articles/360005514233-How-to-keep-your-24-word-recovery-phrase-and-PIN-code-safe-?docs=true/
@@ -123,4 +123,4 @@ async def react_description(query: Query):
 
 ############### START COMMAND ##########
 
-#   uvicorn api_bot:app --reload
+#   uvicorn api_bot:app --reload --port 8008
