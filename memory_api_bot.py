@@ -98,7 +98,7 @@ async def react_description(query: Query):
         res_query = index.query(xq, top_k=5, include_metadata=True)
         print(res_query)
 
-        contexts = [item['metadata']['text'] for item in res_query['matches'] if item['score'] > 0.8]
+        contexts = [item['metadata']['text'] for item in res_query['matches'] if item['score'] > 0.78]
 
         # If there's a previous response, include it in the augmented query
         prev_response_line = f"YOUR PREVIOUS RESPONSE: {last_response}\n\n-----\n\n" if last_response else ""
