@@ -38,8 +38,8 @@ class Query(BaseModel):
 
 pinecone.init(api_key=os.environ['PINECONE_API_KEY'], enviroment=os.environ['PINECONE_ENVIRONMENT'])
 pinecone.whoami()
-#index_name = 'hc'
-index_name = 'academyzd'
+index_name = 'hc'
+#index_name = 'academyzd'
 index = pinecone.Index(index_name)
 
 embed_model = "text-embedding-ada-002"
