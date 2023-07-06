@@ -100,7 +100,6 @@ async def react_description(query: Query):
 
         contexts = [item['metadata']['text'] for item in res_query['matches'] if item['score'] > 0.8]
 
-        # If there's a previous response, include it in the augmented query
         prev_response_line = f"YOUR PREVIOUS RESPONSE: {last_response}\n\n-----\n\n" if last_response else ""
 
         augmented_query = "CONTEXT: " + "\n\n-----\n\n" + "\n\n---\n\n".join(contexts) + "\n\n-----\n\n" + prev_response_line + "USER QUESTION: " + "\n\n" + '"' + query.user_input + '" ' + "\n\n" + "YOUR RESPONSE: "
@@ -116,8 +115,6 @@ async def react_description(query: Query):
             ]
         )
         response = res['choices'][0]['message']['content']
-
-        # Save the response to the global variable
         last_response = response
 
         print(response)
