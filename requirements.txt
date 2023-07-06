@@ -12,3 +12,4 @@ fastapi
 pydantic
 uvicorn
 flask
+google.cloud
