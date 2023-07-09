@@ -35,7 +35,7 @@ openai.api_key=os.environ['OPENAI_API_KEY']
 
 class Query(BaseModel):
     user_input: str
-    #user_id: str #new
+    user_id: str #New
 
 
 # Prepare augmented query
@@ -81,9 +81,9 @@ Begin!
 # Define FastAPI app
 app = FastAPI()
 
-last_response = None
-# user_states = {} #new
-
+#last_response = None
+user_states = {} #New
+print(user_states)
 
 # Define FastAPI endpoints
 @app.get("/")
@@ -93,11 +93,12 @@ async def root():
 @app.post('/gpt')
 async def react_description(query: Query):
     print(f"Received request with data: {query.dict()}")
-    global last_response  # Refer to the global variable
-    # user_id = query.user_id  # New - Get the user ID from the request
-    # user_input = query.user_input #New 
-    # if user_id not in user_states:  # New -  Initialize a new state if necessary
-    #    user_states[user_id] = None #New
+    #global last_response  # Refer to the global variable
+    user_id = query.user_id  # New - Get the user ID from the request
+    user_input = query.user_input #New 
+    if user_id not in user_states:  # New -  Initialize a new state if necessary
+        user_states[user_id] = None #New
+    last_response = user_states[user_id]
     try:
         res_embed = openai.Embedding.create(
             input=[query.user_input],
@@ -129,17 +130,11 @@ async def react_description(query: Query):
         response = res['choices'][0]['message']['content']
 
         # Save the response to the global variable
-        last_response = response
-        #user_states[user_id] = response
+        #last_response = response
+        user_states[user_id] = response #New
 
         print(response)
         return {'output': response}
     except ValueError as e:
         print(e)
         raise HTTPException(status_code=400, detail="Invalid input")
-
-
-############### START COMMAND ##########
-
-#   uvicorn memory_api_bot:app --reload --port 8008
-#   sudo uvicorn api_bot:app --port 80 --host 0.0.0.0
