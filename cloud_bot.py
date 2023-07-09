@@ -34,6 +34,7 @@ os.environ.update(env_vars)
 
 class Query(BaseModel):
     user_input: str
+    user_id: str 
 
 # Prepare augmented query
 
@@ -75,7 +76,7 @@ Begin!
 # Define FastAPI app
 app = FastAPI()
 
-last_response = None
+user_states = {} 
 
 # Define FastAPI endpoints
 @app.get("/")
@@ -84,7 +85,11 @@ async def root():
 
 @app.post('/gpt')
 async def react_description(query: Query):
-    global last_response  # Refer to the global variable
+    # global last_response  # Refer to the global variable
+    user_id = query.user_id
+    if user_id not in user_states:  # Initialize a new state if necessary
+        user_states[user_id] = None
+    last_response = user_states[user_id]
     try:
         res_embed = openai.Embedding.create(
             input=[query.user_input],
@@ -114,6 +119,7 @@ async def react_description(query: Query):
         )
         response = res['choices'][0]['message']['content']
         last_response = response
+        user_states[user_id] = response
 
         print(response)
         return {'output': response}
