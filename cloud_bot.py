@@ -3,9 +3,7 @@ import uuid
 import json
 from langchain.vectorstores import Pinecone
 from langchain.embeddings.openai import OpenAIEmbeddings
-from langchain.vectorstores import FAISS
 from dotenv import main
-from web3 import Web3
 import pinecone
 import openai
 from fastapi import FastAPI
