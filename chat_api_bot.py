@@ -144,42 +144,7 @@ async def react_description(query: Query):
 
     try:
         global last_response
-        #response = await get_gpt_response(query)
         docs = await get_gpt_response(query)
-
-
-################################## REACT AGENT #################################
-
-        # tools = [
-        #     Tool(
-        #         name = "Knowledge Base",
-        #         func=lambda *args, **kwargs: response,
-        #         description="Always use to answer technical questions about Ledger products."
-        #     ),
-        # ]
-
-        # memory = ConversationBufferMemory(
-        #     memory_key="chat_history",
-        #     k=5, 
-        #     return_messages=True)
-        # print(memory)
-
-        # llm = ChatOpenAI(openai_api_key=os.environ['OPENAI_API_KEY'], temperature=0)
-
-        # agent_chain = initialize_agent(
-
-        #     tools, 
-        #     llm, 
-        #     agent=AgentType.CHAT_CONVERSATIONAL_REACT_DESCRIPTION, 
-        #     verbose=True, 
-        #     memory=memory,
-        #     max_iterations=3,
-                                    
-        # )
-
-        # chat = agent_chain.run(input=query.user_input)
-
-##################### QA CHAIN #######################
 
         last_response_text = last_response if last_response else " "
 
@@ -217,7 +182,6 @@ async def react_description(query: Query):
         last_response = chat['output_text']
 
         return {'output': chat['output_text']}
-        #return {'output': chat}
     
     except ValueError as e:
         print(e)
