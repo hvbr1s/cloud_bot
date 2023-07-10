@@ -8,13 +8,9 @@ import pinecone
 import openai
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
-from langchain.agents import Tool
-from langchain.agents import AgentType
 from langchain.prompts import PromptTemplate
 from langchain.memory import ConversationBufferMemory
 from langchain import OpenAI
-from langchain.agents import initialize_agent
-from langchain.chat_models import ChatOpenAI
 from langchain.llms import OpenAI
 from langchain.chains.question_answering import load_qa_chain
 
