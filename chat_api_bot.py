@@ -91,11 +91,6 @@ last_response = None
 async def root():
     return {'welcome' : 'You have reached the home route!'}
 
-@app.get("/")
-async def root():
-    return {'welcome' : 'You have reached the home route!'}
-
-
 @app.post('/gpt')
 async def react_description(query: Query):
     # Define get_gpt_response() inside your app logic
