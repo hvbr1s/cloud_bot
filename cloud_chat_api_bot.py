@@ -16,23 +16,30 @@ from langchain.chains.question_answering import load_qa_chain
 
 import re
 
-main.load_dotenv()
+from google.cloud import secretmanager
 
-env_vars = [
-    'OPENAI_API_KEY',
-    'ALCHEMY_API_KEY',
-    'PINECONE_API_KEY',
-    'PINECONE_ENVIRONMENT',
-]
+def access_secret_version(project_id, secret_id, version_id):
+    client = secretmanager.SecretManagerServiceClient()
+    name = f"projects/{project_id}/secrets/{secret_id}/versions/{version_id}"
+    response = client.access_secret_version(request={"name": name})
+    return response.payload.data.decode('UTF-8')
 
-os.environ.update({key: os.getenv(key) for key in env_vars})
-PINECONE_API_KEY = os.getenv("PINECONE_API_KEY")
-PINECONE_ENVIRONMENT = os.getenv("PINECONE_ENVIRONMENT")
+
+env_vars = {
+    'OPENAI_API_KEY': access_secret_version('slack-bot-391618', 'OPENAI_API_KEY', 'latest'),
+    'PINECONE_API_KEY': access_secret_version('slack-bot-391618', 'PINECONE_API_KEY', '1'),
+    'PINECONE_ENVIRONMENT': access_secret_version('slack-bot-391618', 'PINECONE_ENVIRONMENT', '1'),
+
+}
+
+os.environ.update(env_vars)
+
 openai.api_key=os.environ['OPENAI_API_KEY']
 
 
 class Query(BaseModel):
     user_input: str
+    user_id: str #New
 
 class Document:
     def __init__(self, page_content, metadata=None):
@@ -47,6 +54,8 @@ class Document:
 pinecone.init(api_key=os.environ['PINECONE_API_KEY'], enviroment=os.environ['PINECONE_ENVIRONMENT'])
 pinecone.whoami()
 index_name = 'hc'
+#index_name = 'academyzd'
+
 index = pinecone.Index(index_name)
 
 embed_model = "text-embedding-ada-002"
@@ -62,6 +71,7 @@ When users inquire about tokens, crypto or coins supported in Ledger Live , it i
 
 VERY IMPORTANT:
 
+- The Ledger device and Ledger Live app have independent cryptocurrency compatibilities. If a coin/token is supported by your device but not the app, you'll need to use a compatible third-party wallet instead.
 - If the query is not about Ledger products, disregard the CONTEXT. Respond courteously and invite any Ledger-related questions.
 - When responding to a question, include a maximum of two URL links from the provided CONTEXT, choose the most relevant.
 - Do not share URLs if none are mentioned within the CONTEXT.
@@ -84,7 +94,8 @@ Begin!
 app = FastAPI()
 
 last_response = None
-
+user_states = {} #New
+print(user_states)
 
 # Define FastAPI endpoints
 @app.get("/")
@@ -95,7 +106,11 @@ async def root():
 async def react_description(query: Query):
     # Define get_gpt_response() inside your app logic
     async def get_gpt_response(query):
-        global last_response
+        user_id = query.user_id  # New - Get the user ID from the request
+        user_input = query.user_input #New 
+        if user_id not in user_states:  # New -  Initialize a new state if necessary
+            user_states[user_id] = None #New
+        last_response = user_states[user_id]
         res_embed = openai.Embedding.create(
             input=[query.user_input],
             engine=embed_model
@@ -110,14 +125,15 @@ async def react_description(query: Query):
         
         prev_response_line = f"YOUR PREVIOUS RESPONSE: {last_response}\n\n-----\n\n" if last_response else ""
         
-        augmented_query = "CONTEXT: " + "\n\n-----\n\n" + "\n\n---\n\n".join(contexts) + "\n\n-----\n\n" + prev_response_line + "USER QUESTION: " + "\n\n" + '"' + query.user_input + '" ' + "\n\n" + "YOUR RESPONSE: "
+        augmented_query = "CONTEXT: " + "\n\n-----\n\n" + "\n\n---\n\n".join(contexts) + "\n\n-----\n\n" + prev_response_line + "USER QUESTION: " + "\n\n" + '"' + query.user_input + '" ' + "\n\n" + "YOUR SHORT RESPONSE: "
 
         
         print(augmented_query)
 
         res = openai.ChatCompletion.create(
             temperature=0.0,
-            model='gpt-4',
+            #model='gpt-4',
+            model="gpt-3.5-turbo-16k",
             messages=[
                 {"role": "system", "content": primer},
                 {"role": "user", "content": augmented_query}
@@ -132,9 +148,9 @@ async def react_description(query: Query):
         
         docs = [Document(page_content=response)]
         return docs
-
     try:
         global last_response
+        #response = await get_gpt_response(query)
         docs = await get_gpt_response(query)
 
         last_response_text = last_response if last_response else " "
@@ -152,7 +168,7 @@ async def react_description(query: Query):
 
         YOUR PREVIOUS ANSWER: """ + last_response_text + """
         USER QUESTION: {human_input}
-        YOUR RESPONSE:"""
+        YOUR SHORT RESPONSE: """
 
 
         prompt = PromptTemplate(
@@ -173,7 +189,6 @@ async def react_description(query: Query):
         last_response = chat['output_text']
 
         return {'output': chat['output_text']}
-    
     except ValueError as e:
         print(e)
         raise HTTPException(status_code=400, detail="Invalid input")
