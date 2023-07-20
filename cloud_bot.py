@@ -1,13 +1,18 @@
-import os
-import uuid
 import json
 from langchain.vectorstores import Pinecone
 from langchain.embeddings.openai import OpenAIEmbeddings
 from dotenv import main
 import pinecone
 import openai
-from fastapi import FastAPI
-from pydantic import BaseModel
+from fastapi import FastAPI, Request, HTTPException, status, Depends
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
+from fastapi import Depends, HTTPException, status
+from fastapi.security import APIKeyHeader
+from pydantic import BaseModel, parse_obj_as
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.util import get_remote_address
+from slowapi.errors import RateLimitExceeded
+from slowapi.middleware import SlowAPIMiddleware
 
 import re
 
@@ -21,21 +26,33 @@ def access_secret_version(project_id, secret_id, version_id):
 
 
 env_vars = {
-    'OPENAI_API_KEY': access_secret_version('slack-bot-391618', 'OPENAI_API_KEY', 'latest'),
-    'ALCHEMY_API_KEY': access_secret_version('slack-bot-391618', 'ALCHEMY_API_KEY', 'latest'),
-    'PINECONE_API_KEY': access_secret_version('slack-bot-391618', 'PINECONE_API_KEY', 'latest'),
-    'PINECONE_ENVIRONMENT': access_secret_version('slack-bot-391618', 'PINECONE_ENVIRONMENT', 'latest'),
+    'OPENAI_API_KEY': access_secret_version('', 'OPENAI_API_KEY', 'latest'),
+    'PINECONE_API_KEY': access_secret_version('', 'PINECONE_API_KEY', 'latest'),
+    'PINECONE_ENVIRONMENT': access_secret_version('', 'PINECONE_ENVIRONMENT', 'latest'),
+    'BACKEND_API_KEY': access_secret_version('', 'BACKEND_API_KEY', 'latest')
 
 }
+
 
 os.environ.update(env_vars)
 
 openai.api_key=os.environ['OPENAI_API_KEY']
+server_api_key=os.environ['BACKEND_API_KEY'] 
+
+#### INITIALIZE API ACCESS KEY #####
+
+API_KEY_NAME = "Authorization"
+api_key_header = APIKeyHeader(name=API_KEY_NAME, auto_error=False)
+
+async def get_api_key(api_key_header: str = Depends(api_key_header)):
+    if api_key_header.split(' ')[1] != server_api_key:
+        raise HTTPException(status_code=401, detail="Could not validate credentials")
+    return api_key_header
 
 
 class Query(BaseModel):
     user_input: str
-    user_id: str #New
+    user_id: str
 
 
 # Prepare augmented query
@@ -53,10 +70,10 @@ primer = """
 
 You are Samantha, a highly intelligent and helpful virtual assistant designed to support Ledger, a French cryptocurrency company led by CEO Pascal Gauthier. Your primary responsibility is to assist Ledger users by providing accurate answers to their questions. If a question is unclear or lacks detail, ask for more information instead of making assumptions. If you are unsure of an answer, be honest and seek clarification.
 
-Users may ask about various Ledger products, including the Ledger Nano S (no battery, low storage), Nano X (Bluetooth, large storage, has a battery), Nano S Plus (large storage, no Bluetooth, no battery), Ledger Stax (unreleased), Ledger Recover and Ledger Live.
-The official Ledger store is located at https://shop.ledger.com/. The Ledger Recover White Paper is located at https://github.com/LedgerHQ/recover-whitepaper . For authorized resellers, please visit https://www.ledger.com/reseller/. Do not modify or share any other links for these purposes.
+Users may ask about various Ledger products, including the Ledger Nano S (no battery, low storage), Nano X (Bluetooth, large storage, has a battery), Nano S Plus (large storage, no Bluetooth, no battery), Ledger Stax (not released yet), Ledger Recover and Ledger Live.
+The official Ledger store is located at https://shop.ledger.com/. For authorized resellers, please visit https://www.ledger.com/reseller/. Do not modify or share any other links for these purposes.
 
-When users inquire about tokens, crypto or coins supported in Ledger Live , it is crucial to strictly recommend checking the Crypto Asset List link to verify support: https://support.ledger.com/hc/en-us/articles/10479755500573?docs=true/. Do NOT provide any other links to the list.
+When users inquire about tokens, crypto or coins supported in Ledger Live, it is crucial to strictly recommend checking the Crypto Asset List link to verify support: https://support.ledger.com/hc/en-us/articles/10479755500573?docs=true/. Do NOT provide any other links to the list.
 
 VERY IMPORTANT:
 
@@ -64,11 +81,11 @@ VERY IMPORTANT:
 - When responding to a question, include a maximum of two URL links from the provided CONTEXT, choose the most relevant.
 - Do not share URLs if none are mentioned within the CONTEXT.
 - Always present URLs as plain text, never use markdown formatting.
-- If a user ask to speak to a human agent, invite them to contact us via this link: https://support.ledger.com/hc/en-us/articles/4423020306705-Contact-Us?support=true
-- If a user reports being victim of a scam or unauthorized crypto transactions, empathetically acknowledge their situation, promptly connect them with a live agent, and share this link for additional help: https://support.ledger.com/hc/en-us/articles/7624842382621-Loss-of-funds?support=true.
+- If a user asks to speak to a human agent, invite them to contact us via this link: https://support.ledger.com/hc/en-us/articles/4423020306705-Contact-Us?support=true
+- If a user reports being the victim of a scam or unauthorized crypto transactions, empathetically acknowledge their situation, promptly connect them with a live agent, and share this link for additional help: https://support.ledger.com/hc/en-us/articles/7624842382621-Loss-of-funds?support=true.
 - Direct users who want to learn more about Ledger products or compare devices to https://www.ledger.com/.
 - Updating or downloading Ledger Live must always be done via this link: https://www.ledger.com/ledger-live
-- Share this list for tips on keeping your recovery phrase safe: https://support.ledger.com/hc/en-us/articles/360005514233-How-to-keep-your-24-word-recovery-phrase-and-PIN-code-safe-?docs=true/
+- Direct all inquiries regarding the upcoming Ledger Stax release to the following FAQ page: https://support.ledger.com/hc/en-us/articles/7914685928221-Ledger-Stax-FAQs
 
 
 Begin!
@@ -77,11 +94,30 @@ Begin!
 
 # #####################################################
 
+def get_user_id(request: Request):
+    try:
+        body = parse_obj_as(Query, request.json())
+        user_id = body.user_id
+        return user_id
+    except Exception as e:
+        return get_remote_address(request)
 
 # Define FastAPI app
 app = FastAPI()
 
-#last_response = None
+# Define limiter
+limiter = Limiter(key_func=get_user_id)
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+app.add_middleware(SlowAPIMiddleware)
+
+@app.exception_handler(RateLimitExceeded)
+async def custom_rate_limit_exceeded_handler(request: Request, exc: RateLimitExceeded):
+    return JSONResponse(
+        status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+        content={"detail": "Too many requests, please try again in a minute."},
+    )
+
 user_states = {} #New
 print(user_states)
 
@@ -91,13 +127,13 @@ async def root():
     return {'welcome' : 'You have reached the home route!'}
 
 @app.post('/gpt')
-async def react_description(query: Query):
+@limiter.limit("20/minute")
+def react_description(query: Query, request: Request, api_key: str = Depends(get_api_key)):
     print(f"Received request with data: {query.dict()}")
-    #global last_response  # Refer to the global variable
-    user_id = query.user_id  # New - Get the user ID from the request
-    user_input = query.user_input #New 
-    if user_id not in user_states:  # New -  Initialize a new state if necessary
-        user_states[user_id] = None #New
+    user_id = query.user_id 
+    user_input = query.user_input  
+    if user_id not in user_states:  
+        user_states[user_id] = None
     last_response = user_states[user_id]
     try:
         res_embed = openai.Embedding.create(
@@ -107,10 +143,10 @@ async def react_description(query: Query):
 
         xq = res_embed['data'][0]['embedding']
 
-        res_query = index.query(xq, top_k=5, include_metadata=True)
+        res_query = index.query(xq, top_k=4, include_metadata=True)
         print(res_query)
 
-        contexts = [item['metadata']['text'] for item in res_query['matches'] if item['score'] > 0.75]
+        contexts = [(item['metadata']['text'] + "\nSource: " + item['metadata'].get('source', 'N/A')) for item in res_query['matches'] if item['score'] > 0.75]
 
         # If there's a previous response, include it in the augmented query
         prev_response_line = f"YOUR PREVIOUS RESPONSE: {last_response}\n\n-----\n\n" if last_response else ""
