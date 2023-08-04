@@ -125,6 +125,10 @@ print(user_states)
 @app.get("/")
 async def root():
     return {'welcome' : 'You have reached the home route!'}
+    
+@app.get("/_health")
+async def health_check():
+    return {"status": "OK"}
 
 @app.post('/gpt')
 @limiter.limit("20/minute")
