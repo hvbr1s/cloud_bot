@@ -1,3 +1,5 @@
+import os
+import uuid
 import json
 from langchain.vectorstores import Pinecone
 from langchain.embeddings.openai import OpenAIEmbeddings
@@ -13,6 +15,7 @@ from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
 from slowapi.middleware import SlowAPIMiddleware
+from nostril import nonsense
 
 import re
 
@@ -26,10 +29,10 @@ def access_secret_version(project_id, secret_id, version_id):
 
 
 env_vars = {
-    'OPENAI_API_KEY': access_secret_version('', 'OPENAI_API_KEY', 'latest'),
-    'PINECONE_API_KEY': access_secret_version('', 'PINECONE_API_KEY', 'latest'),
-    'PINECONE_ENVIRONMENT': access_secret_version('', 'PINECONE_ENVIRONMENT', 'latest'),
-    'BACKEND_API_KEY': access_secret_version('', 'BACKEND_API_KEY', 'latest')
+    'OPENAI_API_KEY': access_secret_version('slack-bot-391618', 'OPENAI_API_KEY', 'latest'),
+    'PINECONE_API_KEY': access_secret_version('slack-bot-391618', 'PINECONE_API_KEY', 'latest'),
+    'PINECONE_ENVIRONMENT': access_secret_version('slack-bot-391618', 'PINECONE_ENVIRONMENT', 'latest'),
+    'BACKEND_API_KEY': access_secret_version('slack-bot-391618', 'BACKEND_API_KEY', 'latest')
 
 }
 
@@ -52,7 +55,7 @@ async def get_api_key(api_key_header: str = Depends(api_key_header)):
 
 class Query(BaseModel):
     user_input: str
-    user_id: str
+    user_id: str 
 
 
 # Prepare augmented query
@@ -68,25 +71,27 @@ embed_model = "text-embedding-ada-002"
 
 primer = """
 
-You are Samantha, a highly intelligent and helpful virtual assistant designed to support Ledger, a French cryptocurrency company led by CEO Pascal Gauthier. Your primary responsibility is to assist Ledger users by providing accurate answers to their questions. If a question is unclear or lacks detail, ask for more information instead of making assumptions. If you are unsure of an answer, be honest and seek clarification.
+You are Samantha, a highly intelligent and helpful virtual assistant designed to support Ledger. Your primary responsibility is to assist Ledger users by providing accurate answers to their questions.
 
-Users may ask about various Ledger products, including the Ledger Nano S (no battery, low storage), Nano X (Bluetooth, large storage, has a battery), Nano S Plus (large storage, no Bluetooth, no battery), Ledger Stax (not released yet), Ledger Recover and Ledger Live.
+Users may ask about various Ledger products, including the Ledger Nano S (no battery, low storage), Nano X (Bluetooth, large storage, has a battery), Nano S Plus (large storage, no Bluetooth, no battery), Ledger Stax, and Ledger Live.
 The official Ledger store is located at https://shop.ledger.com/. For authorized resellers, please visit https://www.ledger.com/reseller/. Do not modify or share any other links for these purposes.
 
 When users inquire about tokens, crypto or coins supported in Ledger Live, it is crucial to strictly recommend checking the Crypto Asset List link to verify support: https://support.ledger.com/hc/en-us/articles/10479755500573?docs=true/. Do NOT provide any other links to the list.
 
 VERY IMPORTANT:
 
-- If the query is not about Ledger products, disregard the CONTEXT. Respond courteously and invite any Ledger-related questions.
+- Use the CONTEXT and CHAT HISTORY to answer users questions
 - When responding to a question, include a maximum of two URL links from the provided CONTEXT, choose the most relevant.
-- Do not share URLs if none are mentioned within the CONTEXT.
+- If the question is unclear or not about Ledger products, disregard the CONTEXT and invite any Ledger-related questions using this exact response: "I'm sorry, I didn't quite understand your question. Could you please provide more details or rephrase it? Remember, I'm here to help with any Ledger-related inquiries."
+- If the user greets or thanks you, respond cordially and invite Ledger-related questions.
 - Always present URLs as plain text, never use markdown formatting.
 - If a user asks to speak to a human agent, invite them to contact us via this link: https://support.ledger.com/hc/en-us/articles/4423020306705-Contact-Us?support=true
-- If a user reports being the victim of a scam or unauthorized crypto transactions, empathetically acknowledge their situation, promptly connect them with a live agent, and share this link for additional help: https://support.ledger.com/hc/en-us/articles/7624842382621-Loss-of-funds?support=true.
-- Direct users who want to learn more about Ledger products or compare devices to https://www.ledger.com/.
+- If a user reports being victim of a scam or unauthorized crypto transactions, empathetically acknowledge their situation, promptly connect them with a live agent, and share this link for additional help: https://support.ledger.com/hc/en-us/articles/7624842382621-Loss-of-funds?support=true.
+- If a user needs to reset their device, they must always ensure they have their recovery phrase on hand before proceeding with the reset.
 - Updating or downloading Ledger Live must always be done via this link: https://www.ledger.com/ledger-live
-- Direct all inquiries regarding the upcoming Ledger Stax release to the following FAQ page: https://support.ledger.com/hc/en-us/articles/7914685928221-Ledger-Stax-FAQs
-
+- If asked about Ledger Stax, inform the user it's not yet released, but pre-orderers will be notified via email when ready to ship. Share this link for more details: https://support.ledger.com/hc/en-us/articles/7914685928221-Ledger-Stax-FAQs.
+- The Ledger Recover service is not available just yet. When it does launch, keep in mind that it will be entirely optional. Even if you update your device firmware, it will NOT automatically activate the Recover service. Learn more: https://support.ledger.com/hc/en-us/articles/9579368109597-Ledger-Recover-FAQs
+- If you see the error "Something went wrong - Please check that your hardware wallet is set up with the recovery phrase or passphrase associated to the selected account", it's likely your Ledger's recovery phrase doesn't match the account you're trying to access.
 
 Begin!
 
@@ -125,8 +130,8 @@ print(user_states)
 @app.get("/")
 async def root():
     return {'welcome' : 'You have reached the home route!'}
-    
-@app.get("/_health")
+
+@app.get("/health")
 async def health_check():
     return {"status": "OK"}
 
@@ -134,47 +139,51 @@ async def health_check():
 @limiter.limit("20/minute")
 def react_description(query: Query, request: Request, api_key: str = Depends(get_api_key)):
     print(f"Received request with data: {query.dict()}")
-    user_id = query.user_id 
-    user_input = query.user_input  
-    if user_id not in user_states:  
-        user_states[user_id] = None
+    user_id = query.user_id  # New - Get the user ID from the request
+    user_input = query.user_input.strip()
+    if user_id not in user_states:  # New -  Initialize a new state if necessary
+        user_states[user_id] = None #New
     last_response = user_states[user_id]
-    try:
-        res_embed = openai.Embedding.create(
-            input=[query.user_input],
-            engine=embed_model
-        )
-
-        xq = res_embed['data'][0]['embedding']
-
-        res_query = index.query(xq, top_k=4, include_metadata=True)
-        print(res_query)
-
-        contexts = [(item['metadata']['text'] + "\nSource: " + item['metadata'].get('source', 'N/A')) for item in res_query['matches'] if item['score'] > 0.75]
-
-        # If there's a previous response, include it in the augmented query
-        prev_response_line = f"YOUR PREVIOUS RESPONSE: {last_response}\n\n-----\n\n" if last_response else ""
-
-        augmented_query = "CONTEXT: " + "\n\n-----\n\n" + "\n\n---\n\n".join(contexts) + "\n\n-----\n\n" + prev_response_line + "USER QUESTION: " + "\n\n" + '"' + query.user_input + '" ' + "\n\n" + "YOUR RESPONSE: "
-        
-        print(augmented_query)
-
-        res = openai.ChatCompletion.create(
-            temperature=0.0,
-            model='gpt-4',
-            messages=[
-                {"role": "system", "content": primer},
-                {"role": "user", "content": augmented_query}
-            ]
-        )
-        response = res['choices'][0]['message']['content']
-
-        # Save the response to the global variable
-        #last_response = response
-        user_states[user_id] = response #New
-
-        print(response)
-        return {'output': response}
-    except ValueError as e:
-        print(e)
-        raise HTTPException(status_code=400, detail="Invalid input")
+    if not query or nonsense(query):
+        print('Nonsense detected!')
+        return {'output': "I'm sorry, I didn't quite understand your question. Could you please provide more details or rephrase it? Remember, I'm here to help with any Ledger-related inquiries."}
+    else:
+        try:
+            res_embed = openai.Embedding.create(
+                input=[user_input],
+                engine=embed_model
+            )
+    
+            xq = res_embed['data'][0]['embedding']
+    
+            res_query = index.query(xq, top_k=3, include_metadata=True)
+            print(res_query)
+    
+            contexts = [(item['metadata']['text'] + "\nSource: " + item['metadata'].get('source', 'N/A')) for item in res_query['matches'] if item['score'] > 0.75]
+    
+            # If there's a previous response, include it in the augmented query
+            prev_response_line = f"Assistant: {last_response}\n" if last_response else ""
+    
+            augmented_query = "CONTEXT: " + "\n\n-----\n\n" + "\n\n---\n\n".join(contexts) + "\n\n-----\n\n"+ "CHAT HISTORY: \n" + prev_response_line + "User:" + user_input + "\n" + "Assistant: "
+    
+            print(augmented_query)
+    
+            res = openai.ChatCompletion.create(
+                temperature=0.0,
+                model='gpt-4',
+                messages=[
+                    {"role": "system", "content": primer},
+                    {"role": "user", "content": augmented_query}
+                ]
+            )
+            response = res['choices'][0]['message']['content']
+    
+            # Save the response to the global variable
+            #last_response = response
+            user_states[user_id] = response #New
+    
+            print(response)
+            return {'output': response}
+        except ValueError as e:
+            print(e)
+            raise HTTPException(status_code=400, detail="Invalid input")
