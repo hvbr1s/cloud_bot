@@ -131,7 +131,7 @@ print(user_states)
 async def root():
     return {'welcome' : 'You have reached the home route!'}
 
-@app.get("/health")
+@app.get("/_health")
 async def health_check():
     return {"status": "OK"}
 
@@ -140,7 +140,7 @@ async def health_check():
 def react_description(query: Query, request: Request, api_key: str = Depends(get_api_key)):
     print(f"Received request with data: {query.dict()}")
     user_id = query.user_id  # New - Get the user ID from the request
-    user_input = query.user_input.strip()
+    user_input = query.user_input.strip() #New 
     if user_id not in user_states:  # New -  Initialize a new state if necessary
         user_states[user_id] = None #New
     last_response = user_states[user_id]
