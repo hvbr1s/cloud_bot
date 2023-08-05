@@ -144,7 +144,7 @@ def react_description(query: Query, request: Request, api_key: str = Depends(get
     if user_id not in user_states:  # New -  Initialize a new state if necessary
         user_states[user_id] = None #New
     last_response = user_states[user_id]
-    if not query or nonsense(query):
+    if not user_input or nonsense(user_input):
         print('Nonsense detected!')
         return {'output': "I'm sorry, I didn't quite understand your question. Could you please provide more details or rephrase it? Remember, I'm here to help with any Ledger-related inquiries."}
     else:
