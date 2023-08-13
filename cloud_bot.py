@@ -16,6 +16,7 @@ from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
 from slowapi.middleware import SlowAPIMiddleware
 from nostril import nonsense
+import tiktoken
 
 import re
 
@@ -99,6 +100,16 @@ Begin!
 
 # #####################################################
 
+tokenizer = tiktoken.get_encoding('cl100k_base')
+
+# create the length function
+def tiktoken_len(text):
+    tokens = tokenizer.encode(
+        text,
+        disallowed_special=()
+    )
+    return len(tokens)
+
 def get_user_id(request: Request):
     try:
         body = parse_obj_as(Query, request.json())
@@ -134,6 +145,10 @@ async def root():
 @app.get("/_health")
 async def health_check():
     return {"status": "OK"}
+
+@app.get("/_index")
+async def pinecone_index():
+    return {"index": index_name}
 
 @app.post('/gpt')
 @limiter.limit("20/minute")
@@ -177,9 +192,21 @@ def react_description(query: Query, request: Request, api_key: str = Depends(get
                 ]
             )
             response = res['choices'][0]['message']['content']
-    
-            # Save the response to the global variable
-            #last_response = response
+
+            # Counting tokens
+            count_response = tiktoken_len(response)
+            count_query = tiktoken_len(augmented_query)
+            count_sysprompt = tiktoken_len(primer)
+            total_input_tokens = count_sysprompt + count_query
+            print("Total input tokens: " + str(total_input_tokens))
+            total_output_tokens = count_response
+            print("Total output tokens: " + str(total_output_tokens))
+            final_count = total_output_tokens + total_input_tokens
+            print("Total tokens: " + str(final_count))
+            total_price = str(((total_input_tokens / 1000) * 0.03) + ((total_output_tokens / 1000) * 0.06))
+            print("Total price for GPT4 call: " + total_price + " $USD")
+
+            
             user_states[user_id] = response #New
     
             print(response)
