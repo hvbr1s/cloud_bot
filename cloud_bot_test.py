@@ -1,8 +1,6 @@
-
 import os
 import uuid
 import json
-from langchain.vectorstores import Pinecone
 from langchain.embeddings.openai import OpenAIEmbeddings
 from dotenv import main
 import pinecone
