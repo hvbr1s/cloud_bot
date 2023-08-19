@@ -37,6 +37,7 @@ env_vars = {
     'PINECONE_ENVIRONMENT': access_secret_version('slack-bot-391618', 'PINECONE_ENVIRONMENT', 'latest'),
     'BACKEND_API_KEY': access_secret_version('slack-bot-391618', 'BACKEND_API_KEY', 'latest'),
     'LANGCHAIN_API_KEY': access_secret_version('slack-bot-391618', 'LANGCHAIN_API_KEY', 'latest'),
+    'LANGCHAIN_ENDPOINT': access_secret_version('slack-bot-391618', 'LANGCHAIN_ENDPOINT', 'latest'),
     'LANGCHAIN_PROJECT' : access_secret_version('slack-bot-391618', 'LANGCHAIN_PROJECT', 'latest')
 }
 
@@ -45,8 +46,7 @@ os.environ.update(env_vars)
 
 openai.api_key=os.environ['OPENAI_API_KEY']
 server_api_key=os.environ['BACKEND_API_KEY'] 
-LANGCHAIN_ENDPOINT='https://api.smith.langchain.com'
-LANGCHAIN_TRACING_V2=true
+LANGCHAIN_TRACING_V2=True
 
 #### INITIALIZE API ACCESS KEY #####
 
