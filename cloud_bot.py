@@ -1,8 +1,6 @@
 import os
 import uuid
 import json
-from langchain.vectorstores import Pinecone
-from langchain.embeddings.openai import OpenAIEmbeddings
 from dotenv import main
 import pinecone
 import openai
@@ -16,7 +14,6 @@ from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
 from slowapi.middleware import SlowAPIMiddleware
 from nostril import nonsense
-import tiktoken
 
 import re
 
@@ -30,7 +27,7 @@ def access_secret_version(project_id, secret_id, version_id):
 
 
 env_vars = {
-    'OPENAI_API_KEY': access_secret_version('slack-bot-391618', 'OPENAI_API_KEY', 'latest'),
+    'OPENAI_API_KEY': access_secret_version('slack-bot-391618', 'OPENAI_API_KEY', '1'),
     'PINECONE_API_KEY': access_secret_version('slack-bot-391618', 'PINECONE_API_KEY', 'latest'),
     'PINECONE_ENVIRONMENT': access_secret_version('slack-bot-391618', 'PINECONE_ENVIRONMENT', 'latest'),
     'BACKEND_API_KEY': access_secret_version('slack-bot-391618', 'BACKEND_API_KEY', 'latest')
@@ -72,24 +69,26 @@ embed_model = "text-embedding-ada-002"
 
 primer = """
 
-You are Samantha, a highly intelligent and helpful virtual assistant designed to support Ledger. Your primary responsibility is to assist Ledger users by providing accurate answers to their questions.
+You are Samantha, a highly intelligent and helpful virtual assistant designed to support Ledger. Your primary responsibility is to assist Ledger users by providing brief but accurate answers to their questions.
 
-Users may ask about various Ledger products, including the Ledger Nano S (no battery, low storage), Nano X (Bluetooth, large storage, has a battery), Nano S Plus (large storage, no Bluetooth, no battery), Ledger Stax, and Ledger Live.
+Users may ask about various Ledger products, including the Nano X (Bluetooth, large storage, has a battery), Nano S Plus (large storage, no Bluetooth, no battery), Ledger Stax, and the Ledger Live app.
 The official Ledger store is located at https://shop.ledger.com/. For authorized resellers, please visit https://www.ledger.com/reseller/. Do not modify or share any other links for these purposes.
 
 When users inquire about tokens, crypto or coins supported in Ledger Live, it is crucial to strictly recommend checking the Crypto Asset List link to verify support: https://support.ledger.com/hc/en-us/articles/10479755500573?docs=true/. Do NOT provide any other links to the list.
 
 VERY IMPORTANT:
 
-- Use the CONTEXT and CHAT HISTORY to answer users questions
-- When responding to a question, include a maximum of two URL links from the provided CONTEXT, choose the most relevant.
+- Use the provided CONTEXT and CHAT HISTORY to help you answer users' questions
+- When responding to a question, include a maximum of two URL links from the provided CONTEXT.
 - If the question is unclear or not about Ledger products, disregard the CONTEXT and invite any Ledger-related questions using this exact response: "I'm sorry, I didn't quite understand your question. Could you please provide more details or rephrase it? Remember, I'm here to help with any Ledger-related inquiries."
 - If the user greets or thanks you, respond cordially and invite Ledger-related questions.
 - Always present URLs as plain text, never use markdown formatting.
-- If a user asks to speak to a human agent, invite them to contact us via this link: https://support.ledger.com/hc/en-us/articles/4423020306705-Contact-Us?support=true
-- If a user reports being victim of a scam or unauthorized crypto transactions, empathetically acknowledge their situation, promptly connect them with a live agent, and share this link for additional help: https://support.ledger.com/hc/en-us/articles/7624842382621-Loss-of-funds?support=true.
+- If a user requests to speak with a human agent or if you believe they should speak to a human agent, don't share any links, instead invite them to open a ticket or start a live chat.
+- If a user reports being victim of a scam, airdrop scam, hack or unauthorized crypto transactions, empathetically acknowledge their situation, promptly invite them to speak with a human agent, and share this link for additional help: https://support.ledger.com/hc/en-us/articles/7624842382621-Loss-of-funds?support=true.
+- Beware of scams posing as Ledger or Ledger endorsements. We don't support airdrops.
+- If a user reports receiving an NFT in their Polygon account, warn them this could be a scam and share this link: https://support.ledger.com/hc/en-us/articles/8473509294365-Beware-of-address-poisoning-scams
 - If a user needs to reset their device, they must always ensure they have their recovery phrase on hand before proceeding with the reset.
-- Updating or downloading Ledger Live must always be done via this link: https://www.ledger.com/ledger-live
+- If the user needs to update or download Ledger Live, this must always be done via this link: https://www.ledger.com/ledger-live
 - If asked about Ledger Stax, inform the user it's not yet released, but pre-orderers will be notified via email when ready to ship. Share this link for more details: https://support.ledger.com/hc/en-us/articles/7914685928221-Ledger-Stax-FAQs.
 - The Ledger Recover service is not available just yet. When it does launch, keep in mind that it will be entirely optional. Even if you update your device firmware, it will NOT automatically activate the Recover service. Learn more: https://support.ledger.com/hc/en-us/articles/9579368109597-Ledger-Recover-FAQs
 - If you see the error "Something went wrong - Please check that your hardware wallet is set up with the recovery phrase or passphrase associated to the selected account", it's likely your Ledger's recovery phrase doesn't match the account you're trying to access.
@@ -99,16 +98,6 @@ Begin!
 """
 
 # #####################################################
-
-tokenizer = tiktoken.get_encoding('cl100k_base')
-
-# create the length function
-def tiktoken_len(text):
-    tokens = tokenizer.encode(
-        text,
-        disallowed_special=()
-    )
-    return len(tokens)
 
 def get_user_id(request: Request):
     try:
@@ -161,7 +150,7 @@ def react_description(query: Query, request: Request, api_key: str = Depends(get
     last_response = user_states[user_id]
     if not user_input or nonsense(user_input):
         print('Nonsense detected!')
-        return {'output': "I'm sorry, I didn't quite understand your question. Could you please provide more details or rephrase it? Remember, I'm here to help with any Ledger-related inquiries."}
+        return {'output': "I'm sorry, I cannot understand your question. Could you please provide more details or rephrase it? Remember, I'm here to help with any Ledger-related inquiries."}
     else:
         try:
             res_embed = openai.Embedding.create(
@@ -174,7 +163,7 @@ def react_description(query: Query, request: Request, api_key: str = Depends(get
             res_query = index.query(xq, top_k=3, include_metadata=True)
             print(res_query)
     
-            contexts = [(item['metadata']['text'] + "\nSource: " + item['metadata'].get('source', 'N/A')) for item in res_query['matches'] if item['score'] > 0.75]
+            contexts = [(item['metadata']['text'] + "\nSource: " + item['metadata'].get('source', 'N/A')) for item in res_query['matches'] if item['score'] > 0.77]
     
             # If there's a previous response, include it in the augmented query
             prev_response_line = f"Assistant: {last_response}\n" if last_response else ""
@@ -192,21 +181,9 @@ def react_description(query: Query, request: Request, api_key: str = Depends(get
                 ]
             )
             response = res['choices'][0]['message']['content']
-
-            # Counting tokens
-            count_response = tiktoken_len(response)
-            count_query = tiktoken_len(augmented_query)
-            count_sysprompt = tiktoken_len(primer)
-            total_input_tokens = count_sysprompt + count_query
-            print("Total input tokens: " + str(total_input_tokens))
-            total_output_tokens = count_response
-            print("Total output tokens: " + str(total_output_tokens))
-            final_count = total_output_tokens + total_input_tokens
-            print("Total tokens: " + str(final_count))
-            total_price = str(((total_input_tokens / 1000) * 0.03) + ((total_output_tokens / 1000) * 0.06))
-            print("Total price for GPT4 call: " + total_price + " $USD")
-
-            
+    
+            # Save the response to the global variable
+            #last_response = response
             user_states[user_id] = response #New
     
             print(response)
