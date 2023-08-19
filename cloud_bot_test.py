@@ -139,7 +139,8 @@ async def custom_rate_limit_exceeded_handler(request: Request, exc: RateLimitExc
         content={"detail": "Too many requests, please try again in a minute."},
     )
 
-user_states = {} #New
+# Stores the bot's last response for extra context
+user_states = {}
 print(user_states)
 
 # Define FastAPI endpoints
