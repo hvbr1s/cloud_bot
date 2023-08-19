@@ -44,6 +44,8 @@ os.environ.update(env_vars)
 
 openai.api_key=os.environ['OPENAI_API_KEY']
 server_api_key=os.environ['BACKEND_API_KEY'] 
+LANGCHAIN_ENDPOINT='https://api.smith.langchain.com'
+LANGCHAIN_TRACING_V2=true
 
 #### INITIALIZE API ACCESS KEY #####
 
