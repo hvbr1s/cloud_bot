@@ -35,8 +35,10 @@ env_vars = {
     'OPENAI_API_KEY': access_secret_version('slack-bot-391618', 'OPENAI_API_KEY', 'latest'),
     'PINECONE_API_KEY': access_secret_version('slack-bot-391618', 'PINECONE_API_KEY', 'latest'),
     'PINECONE_ENVIRONMENT': access_secret_version('slack-bot-391618', 'PINECONE_ENVIRONMENT', 'latest'),
-    'BACKEND_API_KEY': access_secret_version('slack-bot-391618', 'BACKEND_API_KEY', 'latest')
-
+    'BACKEND_API_KEY': access_secret_version('slack-bot-391618', 'BACKEND_API_KEY', 'latest'),
+    'LANGCHAIN_API_KEY': access_secret_version('slack-bot-391618', 'LANGCHAIN_API_KEY', 'latest'),
+    'LANGCHAIN_API_KEY': access_secret_version('slack-bot-391618', 'LANGCHAIN_API_KEY', 'latest'),
+    'LANGCHAIN_PROJECT' : access_secret_version('slack-bot-391618', 'LANGCHAIN_PROJECT', 'latest')
 }
 
 
