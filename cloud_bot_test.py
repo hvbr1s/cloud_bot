@@ -17,7 +17,6 @@ from slowapi.middleware import SlowAPIMiddleware
 from nostril import nonsense
 import tiktoken
 from langsmith.run_helpers import traceable
-
 import re
 
 from google.cloud import secretmanager
@@ -61,9 +60,7 @@ class Query(BaseModel):
     user_input: str
     user_id: str 
 
-
-# Prepare augmented query
-
+# Initialize Pinecone
 pinecone.init(api_key=os.environ['PINECONE_API_KEY'], enviroment=os.environ['PINECONE_ENVIRONMENT'])
 pinecone.whoami()
 #index_name = 'hc'
@@ -85,7 +82,7 @@ When users inquire about tokens, crypto or coins supported in Ledger Live, it is
 VERY IMPORTANT:
 
 - Use the provided CONTEXT and CHAT HISTORY to help you answer users' questions
-- When responding to a question, include a maximum of two URL links from the provided CONTEXT.
+- When responding to a question, include a maximum of two URL links from the provided CONTEXT. If the context doesn't provide links, do not share any.
 - If the question is unclear or not about Ledger products, disregard the CONTEXT and invite any Ledger-related questions using this exact response: "I'm sorry, I didn't quite understand your question. Could you please provide more details or rephrase it? Remember, I'm here to help with any Ledger-related inquiries."
 - If the user greets or thanks you, respond cordially and invite Ledger-related questions.
 - Always present URLs as plain text, never use markdown formatting.
@@ -106,9 +103,20 @@ Begin!
 
 # #####################################################
 
-tokenizer = tiktoken.get_encoding('cl100k_base')
+# Email address  detector
+email_pattern = r'[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}'
+def find_emails(text):  
+    return re.findall(email_pattern, text)
+
+# Address filter:
+ETHEREUM_ADDRESS_PATTERN = r'\b0x[a-fA-F0-9]{40}\b'
+BITCOIN_ADDRESS_PATTERN = r'\b(1|3)[1-9A-HJ-NP-Za-km-z]{25,34}\b|bc1[a-zA-Z0-9]{25,90}\b'
+LITECOIN_ADDRESS_PATTERN = r'\b(L|M)[a-km-zA-HJ-NP-Z1-9]{26,34}\b'
+DOGECOIN_ADDRESS_PATTERN = r'\bD{1}[5-9A-HJ-NP-U]{1}[1-9A-HJ-NP-Za-km-z]{32}\b'
+XRP_ADDRESS_PATTERN = r'\br[a-zA-Z0-9]{24,34}\b'
 
 # create the length function
+tokenizer = tiktoken.get_encoding('cl100k_base')
 def tiktoken_len(text):
     tokens = tokenizer.encode(
         text,
@@ -167,7 +175,22 @@ async def react_description(query: Query, request: Request, api_key: str = Depen
     last_response = user_states[user_id]
     if not user_input or nonsense(user_input):
         print('Nonsense detected!')
-        return {'output': "I'm sorry, I cannot understand your question. Could you please provide more details or rephrase it? Remember, I'm here to help with any Ledger-related inquiries."}
+        return {'output': "I'm sorry, I cannot understand your question, and I can't assist with questions that include cryptocurrency addresses. Could you please provide more details or rephrase it without the address? Remember, I'm here to help with any Ledger-related inquiries."}
+    
+
+    if re.search(ETHEREUM_ADDRESS_PATTERN, user_input, re.IGNORECASE) or \
+           re.search(BITCOIN_ADDRESS_PATTERN, user_input, re.IGNORECASE) or \
+           re.search(LITECOIN_ADDRESS_PATTERN, user_input, re.IGNORECASE) or \
+           re.search(DOGECOIN_ADDRESS_PATTERN, user_input, re.IGNORECASE) or \
+           re.search(XRP_ADDRESS_PATTERN, user_input, re.IGNORECASE):
+        return {'output': "I'm sorry, but I can't assist with questions that include cryptocurrency addresses. Please remove the address and ask again."}
+    
+    if re.search(email_pattern, user_input):
+        return {
+            'output': "I'm sorry, but I can't assist with questions that include email addresses. Please remove the address and ask again."
+        }
+
+
     else:
     
         try:
@@ -180,7 +203,7 @@ async def react_description(query: Query, request: Request, api_key: str = Depen
                 )
                 xq = res_embed['data'][0]['embedding']
                 res_query = index.query(xq, top_k=3, include_metadata=True)
-                contexts = [(item['metadata']['text'] + "\nLearn more: " + item['metadata'].get('source', 'N/A')) for item in res_query['matches'] if item['score'] > 0.80]
+                contexts = [(item['metadata']['text'] + "\nLearn more: " + item['metadata'].get('source', 'N/A')) for item in res_query['matches'] if item['score'] > 0.77]
                 prev_response_line = f"Assistant: {last_response}\n" if last_response else ""
                 augmented_query = "CONTEXT: " + "\n\n-----\n\n" + "\n\n---\n\n".join(contexts) + "\n\n-----\n\n"+ "CHAT HISTORY: \n" + prev_response_line + "User: " + user_input + "\n" + "Assistant: "
                 return augmented_query
@@ -188,7 +211,7 @@ async def react_description(query: Query, request: Request, api_key: str = Depen
             augmented_query = await retrieve(user_input)
             print(augmented_query)
 
-            @traceable(run_type="chain")
+            #@traceable(run_type="chain")
             async def rag(query, contexts=None):
                 print("RAG > Called!")
                 res = openai.ChatCompletion.create(
