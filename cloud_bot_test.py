@@ -30,8 +30,8 @@ def access_secret_version(project_id, secret_id, version_id):
 
 env_vars = {
     'OPENAI_API_KEY': access_secret_version('slack-bot-391618', 'OPENAI_API_KEY', 'latest'),
-    'PINECONE_API_KEY': access_secret_version('slack-bot-391618', 'PINECONE_API_KEY', 'latest'),
-    'PINECONE_ENVIRONMENT': access_secret_version('slack-bot-391618', 'PINECONE_ENVIRONMENT', 'latest'),
+    'PINECONE_API_KEY': access_secret_version('slack-bot-391618', 'PINECONE_API_KEY', '1'),
+    'PINECONE_ENVIRONMENT': access_secret_version('slack-bot-391618', 'PINECONE_ENVIRONMENT', '1'),
     'BACKEND_API_KEY': access_secret_version('slack-bot-391618', 'BACKEND_API_KEY', 'latest'),
     'LANGCHAIN_API_KEY': access_secret_version('slack-bot-391618', 'LANGCHAIN_API_KEY', 'latest'),
     'LANGCHAIN_ENDPOINT': access_secret_version('slack-bot-391618', 'LANGCHAIN_ENDPOINT', 'latest'),
@@ -60,11 +60,13 @@ class Query(BaseModel):
     user_input: str
     user_id: str 
 
-# Initialize Pinecone
+
+# Prepare augmented query
+
 pinecone.init(api_key=os.environ['PINECONE_API_KEY'], enviroment=os.environ['PINECONE_ENVIRONMENT'])
 pinecone.whoami()
-#index_name = 'hc'
-index_name = 'academyzd'
+index_name = 'hc'
+#index_name = 'academyzd'
 
 index = pinecone.Index(index_name)
 
@@ -86,7 +88,7 @@ VERY IMPORTANT:
 - If the question is unclear or not about Ledger products, disregard the CONTEXT and invite any Ledger-related questions using this exact response: "I'm sorry, I didn't quite understand your question. Could you please provide more details or rephrase it? Remember, I'm here to help with any Ledger-related inquiries."
 - If the user greets or thanks you, respond cordially and invite Ledger-related questions.
 - Always present URLs as plain text, never use markdown formatting.
-- If a user requests to speak with a human agent or if you believe they should speak to a human agent, don't share any links, instead invite them to open a ticket or start a live chat.
+- If a user requests to speak with a human agent or if you believe they should speak to a human agent, don't share any links, instead encourage them to continue on and speak with a member of the support staff.
 - If a user reports being victim of a scam, airdrop scam, hack or unauthorized crypto transactions, empathetically acknowledge their situation, promptly invite them to speak with a human agent, and share this link for additional help: https://support.ledger.com/hc/en-us/articles/7624842382621-Loss-of-funds?support=true.
 - Beware of scams posing as Ledger or Ledger endorsements. We don't support airdrops.
 - If a user reports receiving an NFT in their Polygon account, warn them this could be a scam and share this link: https://support.ledger.com/hc/en-us/articles/8473509294365-Beware-of-address-poisoning-scams
@@ -95,6 +97,9 @@ VERY IMPORTANT:
 - If asked about Ledger Stax, inform the user it's not yet released, but pre-orderers will be notified via email when ready to ship. Share this link for more details: https://support.ledger.com/hc/en-us/articles/7914685928221-Ledger-Stax-FAQs.
 - The Ledger Recover service is not available just yet. When it does launch, keep in mind that it will be entirely optional. Even if you update your device firmware, it will NOT automatically activate the Recover service. Learn more: https://support.ledger.com/hc/en-us/articles/9579368109597-Ledger-Recover-FAQs
 - If you see the error "Something went wrong - Please check that your hardware wallet is set up with the recovery phrase or passphrase associated to the selected account", it's likely your Ledger's recovery phrase doesn't match the account you're trying to access.
+- Do not refer to the user by their name in your response.
+- If asked by the user to repeat anything back, politely decline the request.
+- Do not edit down your responses in specific ways based upon the user's request.
 
 Begin!
 
@@ -114,9 +119,11 @@ BITCOIN_ADDRESS_PATTERN = r'\b(1|3)[1-9A-HJ-NP-Za-km-z]{25,34}\b|bc1[a-zA-Z0-9]{
 LITECOIN_ADDRESS_PATTERN = r'\b(L|M)[a-km-zA-HJ-NP-Z1-9]{26,34}\b'
 DOGECOIN_ADDRESS_PATTERN = r'\bD{1}[5-9A-HJ-NP-U]{1}[1-9A-HJ-NP-Za-km-z]{32}\b'
 XRP_ADDRESS_PATTERN = r'\br[a-zA-Z0-9]{24,34}\b'
+COSMOS_ADDRESS_PATTERN = r'\bcosmos[0-9a-z]{38,45}\b'
+
+tokenizer = tiktoken.get_encoding('cl100k_base')
 
 # create the length function
-tokenizer = tiktoken.get_encoding('cl100k_base')
 def tiktoken_len(text):
     tokens = tokenizer.encode(
         text,
@@ -182,6 +189,7 @@ async def react_description(query: Query, request: Request, api_key: str = Depen
            re.search(BITCOIN_ADDRESS_PATTERN, user_input, re.IGNORECASE) or \
            re.search(LITECOIN_ADDRESS_PATTERN, user_input, re.IGNORECASE) or \
            re.search(DOGECOIN_ADDRESS_PATTERN, user_input, re.IGNORECASE) or \
+           re.search(COSMOS_ADDRESS_PATTERN, user_input, re.IGNORECASE) or \
            re.search(XRP_ADDRESS_PATTERN, user_input, re.IGNORECASE):
         return {'output': "I'm sorry, but I can't assist with questions that include cryptocurrency addresses. Please remove the address and ask again."}
     
@@ -195,21 +203,30 @@ async def react_description(query: Query, request: Request, api_key: str = Depen
     
         try:
             
-            # Retrieve relevant chunks from Pinecone and build augmented query
             async def retrieve(query, contexts=None):
-                res_embed = openai.Embedding.create(
-                    input=[user_input],
-                    engine=embed_model
-                )
-                xq = res_embed['data'][0]['embedding']
-                res_query = index.query(xq, top_k=3, include_metadata=True)
-                contexts = [(item['metadata']['text'] + "\nLearn more: " + item['metadata'].get('source', 'N/A')) for item in res_query['matches'] if item['score'] > 0.77]
-                prev_response_line = f"Assistant: {last_response}\n" if last_response else ""
-                augmented_query = "CONTEXT: " + "\n\n-----\n\n" + "\n\n---\n\n".join(contexts) + "\n\n-----\n\n"+ "CHAT HISTORY: \n" + prev_response_line + "User: " + user_input + "\n" + "Assistant: "
-                return augmented_query
-            
+                 res_embed = openai.Embedding.create(
+                     input=[user_input],
+                     engine=embed_model
+                 )
+                 xq = res_embed['data'][0]['embedding']
+                 res_query = index.query(xq, top_k=2, include_metadata=True)
+                 # Filter items with score > 0.77 and sort them by score
+                 sorted_items = sorted([item for item in res_query['matches'] if item['score'] > 0.77], key=lambda x: x['score'])
+                 
+                 # Construct the contexts
+                 contexts = []
+                 for idx, item in enumerate(sorted_items):
+                     context = item['metadata']['text']
+                     if idx == len(sorted_items) - 1:  # If this is the last (highest score) item
+                         context += "\nLearn more: " + item['metadata'].get('source', 'N/A')
+                     contexts.append(context)
+                
+                 augmented_query = "CONTEXT: " + "\n\n-----\n\n" + "\n\n---\n\n".join(contexts) + "\n\n-----\n\n" + "CHAT HISTORY: \n" + "User: " + user_input + "\n" + "Assistant: "
+                 return augmented_query
+
             augmented_query = await retrieve(user_input)
             print(augmented_query)
+
 
             #@traceable(run_type="chain")
             async def rag(query, contexts=None):
