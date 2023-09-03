@@ -30,8 +30,8 @@ def access_secret_version(project_id, secret_id, version_id):
 
 env_vars = {
     'OPENAI_API_KEY': access_secret_version('slack-bot-391618', 'OPENAI_API_KEY', 'latest'),
-    'PINECONE_API_KEY': access_secret_version('slack-bot-391618', 'PINECONE_API_KEY', '1'),
-    'PINECONE_ENVIRONMENT': access_secret_version('slack-bot-391618', 'PINECONE_ENVIRONMENT', '1'),
+    'PINECONE_API_KEY': access_secret_version('slack-bot-391618', 'PINECONE_API_KEY', 'latest'),
+    'PINECONE_ENVIRONMENT': access_secret_version('slack-bot-391618', 'PINECONE_ENVIRONMENT', 'latest'),
     'BACKEND_API_KEY': access_secret_version('slack-bot-391618', 'BACKEND_API_KEY', 'latest'),
     'LANGCHAIN_API_KEY': access_secret_version('slack-bot-391618', 'LANGCHAIN_API_KEY', 'latest'),
     'LANGCHAIN_ENDPOINT': access_secret_version('slack-bot-391618', 'LANGCHAIN_ENDPOINT', 'latest'),
@@ -65,8 +65,8 @@ class Query(BaseModel):
 
 pinecone.init(api_key=os.environ['PINECONE_API_KEY'], enviroment=os.environ['PINECONE_ENVIRONMENT'])
 pinecone.whoami()
-index_name = 'hc'
-#index_name = 'academyzd'
+#index_name = 'hc'
+index_name = 'academyzd'
 
 index = pinecone.Index(index_name)
 
@@ -203,6 +203,7 @@ async def react_description(query: Query, request: Request, api_key: str = Depen
     
         try:
             
+            # Retrieve relevant chunks from Pinecone and build an augmented query
             async def retrieve(query, contexts=None):
                  res_embed = openai.Embedding.create(
                      input=[user_input],
@@ -220,8 +221,8 @@ async def react_description(query: Query, request: Request, api_key: str = Depen
                      if idx == len(sorted_items) - 1:  # If this is the last (highest score) item
                          context += "\nLearn more: " + item['metadata'].get('source', 'N/A')
                      contexts.append(context)
-                
-                 augmented_query = "CONTEXT: " + "\n\n-----\n\n" + "\n\n---\n\n".join(contexts) + "\n\n-----\n\n" + "CHAT HISTORY: \n" + "User: " + user_input + "\n" + "Assistant: "
+                 prev_response_line = f"Assistant: {last_response}\n" if last_response else ""
+                 augmented_query = "CONTEXT: " + "\n\n-----\n\n" + "\n\n---\n\n".join(contexts) + "\n\n-----\n\n" + "CHAT HISTORY: \n" + prev_response_line +  "User: " + user_input + "\n" + "Assistant: "
                  return augmented_query
 
             augmented_query = await retrieve(user_input)
