@@ -1,1 +1,1 @@
-A Google Cloud deployment of SamanthaBot designed to help agents with answering customer queries
+A Google Cloud and AWS deployment of SamanthaBot designed to help agents answer customer queries
