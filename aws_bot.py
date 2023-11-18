@@ -1,6 +1,7 @@
 import os
 import boto3
 import json
+import cohere
 from dotenv import main
 import pinecone
 from helicone.openai_async import openai
@@ -19,6 +20,8 @@ from nostril import nonsense
 import tiktoken
 import re
 import time
+from datetime import datetime
+import cohere
 
 
 # Secret Management
@@ -37,7 +40,8 @@ env_vars = {
     'OPENAI_API_KEY': access_secret_parameter('OPENAI_API_KEY'),
     'HELICONE_API_KEY': access_secret_parameter('HELICONE_API_KEY'),
     'PINECONE_API_KEY': access_secret_parameter('PINECONE_API_KEY'),
-    'PINECONE_ENVIRONMENT': access_secret_parameter('PINECONE_ENVIRONMENT')
+    'PINECONE_ENVIRONMENT': access_secret_parameter('PINECONE_ENVIRONMENT'),
+    'COHERE_API_KEY': access_secret_parameter('COHERE_API_KEY')
 }
 
 # Set up boto3 session with AWS credentials
@@ -49,7 +53,10 @@ boto3.setup_default_session(
 
 os.environ.update(env_vars)
 
-#########Initialize backend API keys ######
+# Initialize Cohere
+co = cohere.Client(os.environ["COHERE_API_KEY"])
+
+# Initialize backend API keys
 
 server_api_key=os.environ['BACKEND_API_KEY']
 API_KEY_NAME="Authorization"
@@ -62,13 +69,14 @@ async def get_api_key(api_key_header: str = Depends(api_key_header)):
 
 class Query(BaseModel):
     user_input: str
-    user_id: str
+    user_id: str | None = None
+    user_locale: str | None = None
 
 # Initialize Pinecone
 openai.api_key=os.environ['OPENAI_API_KEY']
 pinecone.init(api_key=os.environ['PINECONE_API_KEY'], environment=os.environ['PINECONE_ENVIRONMENT'])
 pinecone.whoami()
-index_name = 'personal'
+index_name = 'database'
 index = pinecone.Index(index_name)
 
 embed_model = "text-embedding-ada-002"
@@ -77,11 +85,6 @@ with open('system_prompt.txt', 'r') as sys_file:
     primer = sys_file.read()
 
 # #####################################################
-
-# Email address  detector
-email_pattern = r'[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}'
-def find_emails(text):
-    return re.findall(email_pattern, text)
 
 # Address filter:
 ETHEREUM_ADDRESS_PATTERN = r'\b0x[a-fA-F0-9]{40}\b'
@@ -129,7 +132,7 @@ async def custom_rate_limit_exceeded_handler(request: Request, exc: RateLimitExc
 
 # Initialize user state and periodic cleanup function
 user_states = {}
-TIMEOUT_SECONDS = 4 * 60 * 60  # 4 hours
+TIMEOUT_SECONDS = 24 * 60 * 60  # 4 hours
 
 def periodic_cleanup(background_tasks: BackgroundTasks):
     while True:
@@ -161,16 +164,94 @@ def cleanup_expired_states():
 async def root():
     return {"welcome": "You've reached the home route!"}
 
-@app.get("/_health")
-async def health_check():
-    return {"status": "OK"}
 
-@app.get("/_index")
-async def pinecone_index():
-    return {"index": index_name}
+SUPPORTED_LOCALES = {'eng', 'fr'}
+
+@app.post('/pinecone')
+@limiter.limit("100/minute")
+async def retrieval(query: Query, request: Request, api_key: str = Depends(get_api_key)):
+    user_id = query.user_id if query.user_id else "8888"
+    user_input = query.user_input.strip()
+    locale = query.user_locale if query.user_locale in SUPPORTED_LOCALES else "eng"
+
+    if not user_input or nonsense(user_input):
+        print('Nonsense detected!')
+        if locale == "fr":
+            return {'output': "Je suis désolé, je ne peux pas comprendre votre question et je ne peux pas aider avec des questions qui incluent des adresses de cryptomonnaie. Pourriez-vous s'il vous plaît fournir plus de détails ou reformuler sans l'adresse ? N'oubliez pas, je suis ici pour aider avec toute demande liée à Ledger."}
+        else: 
+            return {'output': "I'm sorry, I cannot understand your question, and I can't assist with questions that include cryptocurrency addresses. Could you please provide more details or rephrase it without the address? Remember, I'm here to help with any Ledger-related inquiries."}
+
+    else:
+        
+        try:
+       
+            # Set clock
+            todays_date = datetime.now().strftime("%B %d, %Y")
+            
+            # Define Retrieval (with Cohere embeddings and re-ranking)
+            async def retrieve(query, contexts=None):
+
+                res_embed = co.embed(
+                    texts=[user_input],
+                    model='embed-english-v3.0',
+                    input_type='search_document'
+                    )
+
+                # Grab the embeddings from the response object
+                xq = res_embed.embeddings
+
+                # Pulls 10 chunks from Pinecone
+                res_query = index.query(xq, top_k=7, namespace=locale, include_metadata=True)
+                # Filter out Pinecone chunks with score > 0.77 and sort them by score
+                sorted_items = sorted([item for item in res_query['matches'] if item['score'] > 0.75], key=lambda x: x['score'], reverse=True)
+
+                # Rerank chunks
+                docs = {x["metadata"]['text']: i for i, x in enumerate(res_query["matches"])}
+                rerank_docs = co.rerank(
+                 query=query, documents=docs.keys(), top_n=2, model="rerank-english-v2.0"
+                )
+                reranked = rerank_docs[0].document["text"]
+
+                # Construct the contexts
+                contexts = []
+                contexts.append(reranked)
+            
+               # Add the most relevant URl from sorted_items
+                if sorted_items:  
+                    learn_more = "\nLearn more: " + sorted_items[0]['metadata'].get('source', 'N/A')
+                    contexts.append(learn_more)
+                        
+                return contexts
+
+            response = await retrieve(user_input)
+            augmented_res = "Today is: " + todays_date + "\n" + response[0]
+
+            print("\n\n" + augmented_res + "\n\n")
+
+            return {'output': augmented_res}
+    
+        except ValueError as e:
+            print(e)
+            raise HTTPException(status_code=400, detail="Snap! Something went wrong, please try again!")
+        
+        except HTTPException as e:
+            print(e)
+            # Handle known HTTP exceptions
+            return JSONResponse(
+                status_code=e.status_code,
+                content={"message": e.detail},
+            )
+        except Exception as e:
+            print(e)
+            # Handle other unexpected exceptions
+            return JSONResponse(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                content={"message": "Snap! Something went wrong, please try again!"},
+            )
+
 
 @app.post('/gpt')
-@limiter.limit("50/minute")
+@limiter.limit("100/minute")
 async def react_description(query: Query, request: Request, api_key: str = Depends(get_api_key)):
     user_id = query.user_id
     user_input = query.user_input.strip()
@@ -185,19 +266,6 @@ async def react_description(query: Query, request: Request, api_key: str = Depen
         print('Nonsense detected!')
         return {'output': "I'm sorry, I cannot understand your question, and I can't assist with questions that include cryptocurrency addresses. Could you please provide more details or rephrase it without the address? Remember, I'm here to help with any Ledger-related inquiries."}
 
-    if re.search(ETHEREUM_ADDRESS_PATTERN, user_input, re.IGNORECASE) or \
-           re.search(BITCOIN_ADDRESS_PATTERN, user_input, re.IGNORECASE) or \
-           re.search(LITECOIN_ADDRESS_PATTERN, user_input, re.IGNORECASE) or \
-           re.search(DOGECOIN_ADDRESS_PATTERN, user_input, re.IGNORECASE) or \
-           re.search(COSMOS_ADDRESS_PATTERN, user_input, re.IGNORECASE) or \
-           re.search(SOLANA_ADDRESS_PATTERN, user_input, re.IGNORECASE) or \
-           re.search(XRP_ADDRESS_PATTERN, user_input, re.IGNORECASE):
-        return {'output': "I'm sorry, but I can't assist with questions that include cryptocurrency addresses. Please remove the address and ask again."}
-
-    if re.search(email_pattern, user_input):
-        return {
-            'output': "I'm sorry, but I can't assist with questions that include email addresses. Please remove the address and ask again."
-        }
 
     else:
 
@@ -209,18 +277,30 @@ async def react_description(query: Query, request: Request, api_key: str = Depen
                     engine=embed_model
                 )
                 xq = res_embed['data'][0]['embedding']
-                res_query = index.query(xq, top_k=2, namespace='eng_hc', include_metadata=True)
+                # Pull n chunks from Pinecone
+                res_query = index.query(xq, top_k=5, namespace='azure_docs', include_metadata=True)
                 # Filter items with score > 0.77 and sort them by score
-                sorted_items = sorted([item for item in res_query['matches'] if item['score'] > 0.77], key=lambda x: x['score'])
+                sorted_items = sorted([item for item in res_query['matches'] if item['score'] > 0.70], key=lambda x: x['score'])
 
+                # Rerank chunks with Cohere
+                docs = {x["metadata"]['text']: i for i, x in enumerate(res_query["matches"])}
+                rerank_docs = co.rerank(
+                query=query, documents=docs.keys(), top_n=2, model="rerank-english-v2.0"
+                )
+                reranked = rerank_docs[0].document["text"]
                 # Construct the contexts
-                contexts = []
-                for idx, item in enumerate(sorted_items):
-                    context = item['metadata']['text']
-                    context += "\nLearn more: " + item['metadata'].get('source', 'N/A')
-                    contexts.append(context)
-                previous_conversation = '\n'.join([f"User: {query}\nAssistant: {response}"for query, response in user_states[user_id].get('previous_queries', [])])
-                augmented_query = "CONTEXT: " + "\n\n" + "\n\n".join(contexts) + "\n\n-----\n\n" + "CHAT HISTORY: \n" +  previous_conversation + "\n\n-----\n\n" + "User: " + user_input + "\n" + "Assistant: "
+                context = []
+                context.append(reranked)
+
+                #Add most relevant URL from sorted_items
+                if sorted_items:
+                   learn_more = "\nLearn more: " + sorted_items[0]['metadata'].get('url', 'N/A')
+                   context.append(learn_more)
+
+                last_conversation = user_states[user_id].get('previous_queries', [])[-1] if user_states[user_id].get('previous_queries', []) else None
+                #previous_conversation = f"User: {last_conversation[0]}\nAssistant: {last_conversation[1]}" if last_conversation else ""
+                #previous_conversation = '\n'.join([f"User: {query}\nAssistant: {response}"for query, response in user_states[user_id].get('previous_queries', [])])
+                augmented_query = "CONTEXT: " + "\n\n" + "\n\n".join(context) + "\n\n-----\n\n" + "CHAT HISTORY: \n" + "User: " + user_input + "\n" + "Assistant: "
 
                 return augmented_query
 
@@ -283,7 +363,7 @@ async def react_description(query: Query, request: Request, api_key: str = Depen
 
 # sudo nano /etc/nginx/sites-available/myproject
 # sudo systemctl restart nginx
-#sudo systemctl stop nginx
+# sudo systemctl stop nginx
 
 # sudo nano /etc/systemd/system/slack_bot.service
 # sudo systemctl daemon-reload
